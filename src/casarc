@@ -1,0 +1,16 @@
+#
+# Rename this file to $HOME/.casarc.
+# This assumes you have checked out casarest directly under $HOME,
+# you may need to adjust the paths otherwise
+#
+
+measures.DE200.directory: /opt/casapy-42.2.30986-1-64b/data/ephemerides
+measures.DE405.directory: /opt/casapy-42.2.30986-1-64b/data/ephemerides
+measures.line.directory: /opt/casapy-42.2.30986-1-64b/data/ephemerides
+measures.sources.directory: /opt/casapy-42.2.30986-1-64b/data/ephemerides
+measures.comet.directory: /opt/casapy-42.2.30986-1-64b/data/ephemerides
+measures.ierseop97.directory: /code/geodetic
+measures.ierspredict.directory: /code/geodetic
+measures.tai_utc.directory: /code/geodetic
+measures.igrf.directory: /code/geodetic
+measures.observatory.directory: /code/geodetic
