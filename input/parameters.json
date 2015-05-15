@@ -1,0 +1,17 @@
+{
+"#": "Json doesn't do comments. This is the best work around I could find",
+"sim_id" :null,                     "#": "Simulation ID",
+"sky_model": "example.fits",        "#": " Sky Model. This should be a FITS cube",
+"observatory" :"meerkat",           "#": "Observatory name. as at appears in the CASA Observatories table",
+"antennas" :null,                   "#": "Specify your own antenna positions. [Advanced option]",
+"direction":"J2000,0deg,30deg",        "#": "Pointing centre. skymodel will be recentred to this direction",
+"scanlength": 4,                    "#": "Length of uv-tracks [in hours]",
+"synthesis": 30,                    "#": "Snythesis time. The noise in the simulation will be based on this value [in hours]",
+"dtime": 10,                        "#": "Integration time [in seconds]",
+"im_npix": 2048,
+"im_cellsize": null,                "#": "I left empty. The cellsize will be calculated internally (based on longest baseline)",
+"split_cube": 4,                    "#": "Its good to split the input cube into smaller chunks",
+"addnoise": true,                   "#": "Add noise to simulation. The noise will be based on the sefd",
+"sefd": 521,                        "#": "Sytem Equivalent flux density of dishes",
+"use_default_imaging_settings": true
+}
