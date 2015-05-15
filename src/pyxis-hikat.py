@@ -8,6 +8,7 @@ import sys
 import math
 import numpy as np
 import tempfile
+import json
 import scipy.ndimage as nd
 
 # some useful constants
@@ -61,36 +62,68 @@ def simsky(msname='$MS',skymodel='$LSM',
     elif column!= "MODEL_DATA":
         ms.copycol(fromcol="MODEL_DATA", tocol=column)
 
+_ANTENNAS = {
+    "meerkat": "MeerKAT64_ANTENNAS",
+    "kat-7": "KAT7_ANTENNAS",
+    "vlaa": "vlaa.itrf.txt",
+    "vlab": "vlab.itrf.txt",
+    "vlac": "vlac.itrf.txt",
+    "vlad": "vlad.itrf.txt",
+    "wsrt": "WSRT_ANTENNAS",
+}
 
 def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
-           start=1, stop=1, **kw):
+           start=1, stop=1, config=None, **kw):
 
     makedir(v.DESTDIR)
     
     global MS_LSM_List
-    fitsfile, prefix, nm = interpolate_locals("fitsfile prefix nm")
+    fitsfile, prefix, nm, config = interpolate_locals("fitsfile prefix nm config")
+
     nm = int(nm)
 
     do_step = lambda step: step>=float(start) and step<=float(stop) 
+
+    config = config or CFG
+    # Use parameter file settings
+    if config:
+        with open(config) as params_std:
+            params = json.load(params_std)
+    
+        # Remove empty strings and coments, and convert unicode characters to strings
+        for key in params.keys():
+            if params[key] in ["", "#"]:
+                del params[key]
+            elif isinstance(params[key],unicode):
+                params[key] = str(params[key])
+        global SYNTHESIS, SCAN, DIRECTION, OBSERVATORY, ANTENNAS, DEFAULT_IMAGING_SETTINGS
+        
+        SYNTHESIS = params["synthesis"]
+        SCAN = params["scanlength"]
+        DTIME = params["dtime"]
+        DIRECTION = params["direction"]
+        DEFAULT_IMAGING_SETTINGS = params["use_default_imaging_settings"]
+
+        fitsfile = "%s/%s"%(INDIR, params["sky_model"])
+        OBSERVATORY = params["observatory"].lower()
+
+        if OBSERVATORY.startswith("vla"):
+            OBSERVATORY = "vla"
+
+        elif OBSERVATORY in ["kat7","kat-7","kat_7"]:
+            OBSERVATORY = "kat-7"
+
+        ANTENNAS = "./observatories/"+_ANTENNAS[params["observatory"].lower()]
+
+        nm = params["split_cube"]
+        
     get_pw = lambda fitsname: abs(pyfits.open(fitsname)[0].header['CDELT1'])
 
-    (ra,dec),(freq0,dfreq,nchan),naxis = fitsInfo(fitsfile)
+    (ra, dec),(freq0, dfreq, nchan), naxis = fitsInfo(fitsfile)
     dfreq = abs(dfreq)
     chunks = nchan//nm
     
     mss = ['%s-%04d.MS'%(prefix,d) for d in range(nm)]
-
-    if DEFAULT_IMAGING_SETTINGS:
-        # estimate resolution using longest baseline
-        tab = ms.ms()
-        uvmax = max( tab.getcol("UVW")[:2].sum(0)**2 )
-        res = 1.22*((2.998e8/freq)/maxuv)/2.
-
-        # choose cellsize to be sixth of resolution
-        im.cellsize = "%farcsec"%(numpy.rad2deg(res/6)*3600)
-        im.npix = 2048
-        im.weight = "briggs"
-        im.robust = 2 # this equivalent to natural weighting
 
     if do_step(1):
         lsms = im.argo.splitfits(fitsfile, chunks, ctype="FREQ", prefix=prefix)
@@ -122,18 +155,29 @@ def image(msname='$MS', lsmname='$LSM', remove=None, **kw):
     global NSRC
     #NSRC = make_pure_lsm()
 
-    im.stokes = 'I'
-    im.cellseize = '3arcsec'
-    im.weight = 'briggs'
-    im.robust = 0
-    im.npix = 2048
     msname,lsmname = interpolate_locals('msname lsmname')
     v.MS = msname
     v.LSM = lsmname
 
-    im.IMAGE_CHANNELIZE = 1
-    ms.set_default_spectral_info()
+    if DEFAULT_IMAGING_SETTINGS:
+        # estimate resolution using longest baseline
+        tab = ms.ms()
+        spwtab = ms.ms(subtable="SPECTRAL_WINDOW")
+        uvmax = max( tab.getcol("UVW")[:2].sum(0)**2 )
+        freq0 = spwtab.getcol("CHAN_FREQ")[ms.SPWID, 0]
 
+        res = 1.22*((2.998e8/freq0)/uvmax)/2.
+
+        tab.close()
+        spwtab.close()
+
+        # choose cellsize to be sixth of resolution
+        im.cellsize = "%farcsec"%(np.rad2deg(res/6)*3600)
+        im.npix = 2048
+        im.weight = "briggs"
+        im.robust = 2 # this equivalent to natural weighting
+
+    ms.set_default_spectral_info()
 
     # create clean mask to speed things up; use PURE_CAT_LSM
     #tf = tempfile.NamedTemporaryFile(suffix='.fits',dir='.')
@@ -146,7 +190,6 @@ def image(msname='$MS', lsmname='$LSM', remove=None, **kw):
     #im.argo.make_threshold_mask(input='${im.MASK_IMAGE}',output=mask,threshold=0)
     #tf.close()
     
-    im.IMAGER = IMAGER
     #kw.update( {"mask" if IMAGER in ["lwimager","casa"] else "fitsmask":mask} ) 
     im.make_image(dirty=False,restore=True,restored_image=RESTORED,restore_lsm=False,fitbeam=True,**kw)
 
@@ -276,7 +319,7 @@ def _simms(msname='$MS',observatory='$OBSERVATORY',antennas='$ANTENNAS',
             nchan = [_nchan]*SPWIDS
         dfreq = [dfreq]*SPWIDS
                 
-    pos_type = "casa" if os.isdir(antennas) else "ascii"
+    pos_type = "casa" if os.path.isdir(antennas) else "ascii"
 
     info('Making simulated MS: $msname ...')
     msname = simms.create_empty_ms(msname=msname, tel=observatory, direction=direction, 
