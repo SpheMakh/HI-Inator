@@ -37,30 +37,37 @@ import pyrap.quanta as dq
 
 import im.lwimager 
 
-def simsky(msname='$MS',skymodel='$LSM',
-           gain_err=None,pbeam=False,
-           pointing_err=None,addnoise=True,sefd=551,
-           noise=0,scalenoise=1,column='$COLUMN',
+
+def simsky(msname='$MS', skymodel='$LSM',
+           gain_err=None, pbeam=False,
+           pointing_err=None, addnoise=True, sefd=551,
+           noise=0, scalenoise=1, column='$COLUMN',
            freq_chunks='$FREQ_CHUNKS',
            **kw):
     """ simulate sky into MS """
 
-    msname,skymodel,column,freq_chunks = interpolate_locals('msname skymodel column freq_chunks')
+    msname, skymodel, column, freq_chunks = interpolate_locals('msname skymodel column freq_chunks')
+
     if RECENTRE:
-        recentre_fits(skymodel,ra=0.0,dec=-30.0)
-    ms.set_default_spectral_info() 
+        ra, dec = map(np.rad2deg, [ dm.direction(DIRECTION)[m]["value"] for m in "m0","m1"])
+        recentre_fits(skymodel, ra=ra, dec=dec)
+
+    ms.set_default_spectral_info()
     im.IMAGE_CHANNELIZE = 1
 
-    im.lwimager.predict_vis(image=skymodel,column="MODEL_DATA",padding=1.5,wprojplanes=0)
-    xo.sh('rm -fr ${MS:BASE}-${im.stokes}-channel${_nchan}.img.residual') # not sure why this image is there TODO(sphe): look into this
+    im.lwimager.predict_vis(image=skymodel, column="MODEL_DATA", padding=1.5, wprojplanes=128)
+    # Clean up after lwimager
+    xo.sh('rm -fr ${MS:BASE}*-channel*.img.residual') 
 
     if addnoise:
         noise = noise or compute_vis_noise(sefd=sefd)*scalenoise
         if scalenoise!=1:
             info('Visibility noise after scaling is %.3g mJy'%(noise*1e3))
-        simnoise(noise=noise,addToCol='MODEL_DATA',column=column)
+        simnoise(noise=noise, addToCol='MODEL_DATA', column=column)
+
     elif column!= "MODEL_DATA":
         ms.copycol(fromcol="MODEL_DATA", tocol=column)
+
 
 _ANTENNAS = {
     "meerkat": "MeerKAT64_ANTENNAS",
@@ -73,7 +80,7 @@ _ANTENNAS = {
 }
 
 def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
-           start=1, stop=1, config=None, **kw):
+           start=1, stop=1, config=None, addnoise=True, **kw):
 
     makedir(v.DESTDIR)
     
@@ -83,6 +90,8 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
     nm = int(nm)
 
     do_step = lambda step: step>=float(start) and step<=float(stop) 
+    cellsize = None
+    npix = None
 
     config = config or CFG
     # Use parameter file settings
@@ -92,11 +101,14 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
     
         # Remove empty strings and coments, and convert unicode characters to strings
         for key in params.keys():
-            if params[key] in ["", "#"]:
+            if params[key] == "" or key in ["#"]:
                 del params[key]
             elif isinstance(params[key],unicode):
                 params[key] = str(params[key])
-        global SYNTHESIS, SCAN, DIRECTION, OBSERVATORY, ANTENNAS, DEFAULT_IMAGING_SETTINGS
+
+        global SYNTHESIS, SCAN, DIRECTION, OBSERVATORY, ANTENNAS, DEFAULT_IMAGING_SETTINGS, SEFD
+
+        prefix = params["sim_id"] or "hi-inator"
         
         SYNTHESIS = params["synthesis"]
         SCAN = params["scanlength"]
@@ -116,8 +128,15 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
         ANTENNAS = "./observatories/"+_ANTENNAS[params["observatory"].lower()]
 
         nm = params["split_cube"]
+        addnoise = params["addnoise"]
+        SEFD = params["sefd"]
+        cellsize = params["cellsize"]
+        npix = params["npix"]
         
     get_pw = lambda fitsname: abs(pyfits.open(fitsname)[0].header['CDELT1'])
+
+    im.cellsize = "%farcsec"%(cellsize or get_pw(fitsfile)*3600.)
+    im.npix = npix or 2048
 
     (ra, dec),(freq0, dfreq, nchan), naxis = fitsInfo(fitsfile)
     dfreq = abs(dfreq)
@@ -135,18 +154,26 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
         MS_LSM_List = ["%s,%s"%(a, b) for a, b in zip(mss, lsms) ]
         x.sh('rm -f $IMAGELIST')
 
+        scalenoise = 1
+        if addnoise:
+            scalenoise = math.sqrt(SCAN/float(SYNTHESIS)) if SCAN < SYNTHESIS else 1.0
+        
+        global RECENTRE
+        RECENTRE = False
+
         def  make_and_sim(ms_lsm_comb="$MS_LSM", options={}, **kw):
             msname,lsmname = II(ms_lsm_comb).split(',')
             v.MS = msname
             v.LSM = lsmname
             _simms(**kw)
-            simsky(scalenoise=1e-8, **options)
+            
+            simsky(addnoise=addnoise, scalenoise=scalenoise, **options)
             image()
             _add(im.RESTORED_IMAGE, IMAGELIST)
 
         pper('MS_LSM', lambda : make_and_sim(**kw) )
         images = get_list(IMAGELIST)
-        im.argo.combine_fits(images, outname=FULL_IMAGE, ctype='FREQ', keep_old=True)
+        im.argo.combine_fits(images, outname=FULL_IMAGE, ctype='FREQ', keep_old=False)
 
 
 def image(msname='$MS', lsmname='$LSM', remove=None, **kw):
@@ -160,38 +187,15 @@ def image(msname='$MS', lsmname='$LSM', remove=None, **kw):
     v.LSM = lsmname
 
     if DEFAULT_IMAGING_SETTINGS:
-        # estimate resolution using longest baseline
-        tab = ms.ms()
-        spwtab = ms.ms(subtable="SPECTRAL_WINDOW")
-        uvmax = max( tab.getcol("UVW")[:2].sum(0)**2 )
-        freq0 = spwtab.getcol("CHAN_FREQ")[ms.SPWID, 0]
-
-        res = 1.22*((2.998e8/freq0)/uvmax)/2.
-
-        tab.close()
-        spwtab.close()
-
         # choose cellsize to be sixth of resolution
-        im.cellsize = "%farcsec"%(np.rad2deg(res/6)*3600)
         im.npix = 2048
         im.weight = "briggs"
         im.robust = 2 # this equivalent to natural weighting
 
     ms.set_default_spectral_info()
 
-    # create clean mask to speed things up; use PURE_CAT_LSM
-    #tf = tempfile.NamedTemporaryFile(suffix='.fits',dir='.')
-    #tf.flush()
-    #empty_image = tf.name
-    #im.argo.make_empty_image(image=empty_image,channelize=0,**kw)
-    #x.sh('tigger-restore ${empty_image} $PURE_CAT_LSM ${im.MASK_IMAGE} -b 20 -f')
-
-    #mask = im.MASK_IMAGE
-    #im.argo.make_threshold_mask(input='${im.MASK_IMAGE}',output=mask,threshold=0)
-    #tf.close()
-    
-    #kw.update( {"mask" if IMAGER in ["lwimager","casa"] else "fitsmask":mask} ) 
-    im.make_image(dirty=False,restore=True,restored_image=RESTORED,restore_lsm=False,fitbeam=True,**kw)
+    im.make_image(dirty=False, restore=True, restored_image=RESTORED, 
+            restore_lsm=False, mgain=0.85, fitbeam=True,**kw)
 
     if remove:
         remove_channels_from_extremes(II(RESTORED),channels=remove)
@@ -202,6 +206,7 @@ def remove_channels_from_extremes(fitsname,channels=None):
      lwimager,casa do some funny business on the first/last channel. 
      These channels will have to be removed before running the source finder;
     """
+
     hdu = pyfits.open(fitsname)
     data = hdu[0].data
     hdr = hdu[0].header
@@ -237,7 +242,7 @@ def remove_channels_from_extremes(fitsname,channels=None):
     hdu.close()
 
 
-def extract_from_skymodel(lsmname='$LSM',addnoise=True,withnoise='$WITHNOISE',checkfirst=True,**kw):
+def extract_from_skymodel(lsmname='$LSM', addnoise=True, withnoise='$WITHNOISE', checkfirst=True,**kw):
     """ run source finder on perfect cube """
 
     lsmname,withnoise = interpolate_locals('lsmname withnoise')
@@ -249,21 +254,21 @@ def extract_from_skymodel(lsmname='$LSM',addnoise=True,withnoise='$WITHNOISE',ch
                       not adding noise. Rerun with "checkfisrt=False" to force addition of noise ')
             else:
                 makedir(v.DESTDIR)
-                addnoise_fits(lsmname,withnoise,1e-9)
+                addnoise_fits(lsmname, withnoise,1e-9)
 
-    lsm.sofia_search(withnoise,makeplot=True,**kw)
+    lsm.sofia_search(withnoise, makeplot=True, **kw)
 
     return withnoise
 
 
-def addnoise_fits(fitsname,outname,rms,correlated=False,clobber=True):
+def addnoise_fits(fitsname, outname, rms, correlated=False, clobber=True):
     """ add noise to fits file """
 
     im.argo.swap_stokes_freq(fitsname)
     hdu = pyfits.open(fitsname)
     hdr0 = hdu[0].header
     data = hdu[0].data
-    noise =  np.random.normal(0,rms,data.shape) 
+    noise =  np.random.normal(0, rms, data.shape) 
 
     if correlated:
         " do something "
@@ -287,16 +292,16 @@ def addnoise_fits(fitsname,outname,rms,correlated=False,clobber=True):
     hdu.close()
 
     
-def _simms(msname='$MS',observatory='$OBSERVATORY',antennas='$ANTENNAS',
-           synthesis="$SCAN",start_time=None,
-           dtime=60,freq0='$FREQ0',dfreq='10MHz',
-           nchan=2,direction='$DIRECTION',
-           fromfits=True,fitsfile='$LSM',
+def _simms(msname='$MS', observatory='$OBSERVATORY', antennas='$ANTENNAS',
+           synthesis=None, dtime=60, freq0='$FREQ0', dfreq='10MHz',
+           nchan=2, direction='$DIRECTION',
+           fromfits=True, fitsfile='$LSM',
            **kw):
     """ create simulated measurement set """
 
-    msname,observatory,antennas,direction,freq0,fitsfile,synthesis = \
-        interpolate_locals('msname observatory antennas direction freq0 fitsfile synthesis')
+    msname, observatory, antennas, direction, freq0, fitsfile = \
+        interpolate_locals('msname observatory antennas direction freq0 fitsfile')
+
     if MS_REDO is False and exists(msname):
         v.MS = msname
         return
@@ -304,12 +309,8 @@ def _simms(msname='$MS',observatory='$OBSERVATORY',antennas='$ANTENNAS',
     makedir(MSOUT)
 
     if fromfits:
-        (ra, dec),(freq0, dfreq, nchan), naxis = fitsInfo(fitsfile)
-
-        direction="J2000,%fdeg,%fdeg"%(ra, dec)
-        dfreq = abs(dfreq)
-        im.argo.swap_stokes_freq(fitsfile)
-        x.sh('fitstool.py -E CDELT3=$dfreq $fitsfile') 
+        # I only need freq,dfreq,nchan from the bellow line
+        (ra, dec), (freq0, dfreq, nchan), naxis = fitsInfo(fitsfile)
         freq0 += dfreq/2
 
         if SPWIDS > 1:
@@ -318,14 +319,13 @@ def _simms(msname='$MS',observatory='$OBSERVATORY',antennas='$ANTENNAS',
             _nchan = nchan/SPWIDS if nchan%SPWIDS==0 else (nchan +(SPWIDS-1)) /SPWIDS
             nchan = [_nchan]*SPWIDS
         dfreq = [dfreq]*SPWIDS
-                
-    pos_type = "casa" if os.path.isdir(antennas) else "ascii"
 
-    info('Making simulated MS: $msname ...')
-    msname = simms.create_empty_ms(msname=msname, tel=observatory, direction=direction, 
-                pos=antennas, pos_type=pos_type,  nbands=SPWIDS,
-                synthesis=float(synthesis), dtime=dtime, freq0=freq0, 
-                dfreq=dfreq, nchan=nchan, outdir=OUTDIR, **kw)
+    synthesis = SCAN
+
+    info('Making simulated MS: $msname. This may take a while')
+    simms.create_empty_ms(msname, tel=observatory, direction=direction, 
+                pos=antennas, nbands=SPWIDS, synthesis=synthesis, 
+                dtime=dtime, freq0=freq0, dfreq=dfreq, nchan=nchan, **kw)
 
     v.MS = msname
 
@@ -336,17 +336,17 @@ def recentre_fits(fitsname, ra, dec):
         hdr = hdu[0].header
         hdr['CRVAL1'] = ra
         hdr['CRVAL2'] = dec
-        hdu.writeto(fitsname,clobber=True)
+        hdu.writeto(fitsname, clobber=True)
 
 
 def make_pure_lsm():
     makedir(DESTDIR)
-    Model = galProps.Model(PURE_CAT,LSM)
+    Model = galProps.Model(PURE_CAT, LSM)
     model = Model.load()
     model.writeto(PURE_CAT_LSM, overwrite=True)
     return model.nsrcs
 
-def compute_vis_noise (sefd):
+def compute_vis_noise (sefd=None):
     """Computes nominal per-visibility noise"""
 
     sefd = sefd or SEFD
@@ -405,8 +405,8 @@ def simnoise (noise=0, rowchunk=100000, addToCol=None, scale_noise=1.0, column='
 
     if addToCol: colData = tab.getcol(addToCol)
 
-    for row0 in range(0,nrows,rowchunk):
-        nr = min(rowchunk,nrows-row0)
+    for row0 in range(0, nrows, rowchunk):
+        nr = min(rowchunk, nrows-row0)
         dshape[0] = nr
         data = noise*(numpy.random.randn(*dshape) + 1j*numpy.random.randn(*dshape)) * scale_noise
 
@@ -415,7 +415,7 @@ def simnoise (noise=0, rowchunk=100000, addToCol=None, scale_noise=1.0, column='
             info(" $addToCol + noise --> $column (rows $row0 to %d)"%(row0+nr-1))
         else : info("Adding noise to $column (rows $row0 to %d)"%(row0+nr-1))
 
-        tab.putcol(column,data,row0,nr)
+        tab.putcol(column, data, row0, nr)
     tab.close() 
 
 
