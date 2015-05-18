@@ -1,5 +1,5 @@
 FROM radioastro/meqtrees
-RUN apt-get update && apt-get install -y time wsclean git
+RUN apt-get update && apt-get install -y time wsclean git casacore
 
 RUN mkdir -p /code/depends
 RUN git clone https://github.com/ska-sa/pyxis /code/depends/pyxis
