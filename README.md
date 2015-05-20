@@ -1,9 +1,31 @@
 # HI-Inator
 Radio interefometry simulator/imager tailored for HI sky models.
 
+# Download
+```
+git clone https://github.com/SpheMakh/HI-Inator
+```
+
+# Available Arrays
+Request other Arrays via the [issues](https://github.com/SpheMakh/HI-Inator/issues) service.   
+Specify the array you want to use by its key in config file (*/input/parameters.json*).  
+
+| Key | Array |    
+| ------|-----|  
+|meerkat|MeerKAT|  
+|kat-7|KAT-7|  
+|jvlaa|JVLA A Config|  
+|jvlab|JVLA B Config|  
+|jvlac|JVLA C Config|    
+|jvlad|JVLA D Config|  
+|wsrt|WSRT|  
+|ska1mid254|SKA1MID 254 dishes|  
+|ska1mid197|SKA1MID 197 dishes|  
+
+
 # Running the simulator
 1. Place your input skymodel in HI-Inator/input  
-2. Modify the parameters.json config file to suite your needs
+2. Modify the *input/parameters.json* config file to suite your needs
 
 ## Without Docker (Not recommended)
 To run HI-Inator without docker you will need to install MeqTrees and all its related software. This is much easier these days (Thanks to Gijs Molenaar), see [radio-astro ppa](https://launchpad.net/~radio-astro/+archive/ubuntu/main). These are the packages that will need (I may niss some of them):
