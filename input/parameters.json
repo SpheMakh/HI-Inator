@@ -13,5 +13,8 @@
 "split_cube": 2,                    "#": "Its good to split the input cube into smaller chunks",
 "addnoise": false,                   "#": "Add noise to simulation. The noise will be based on the sefd",
 "sefd": 551,                        "#": "Sytem Equivalent flux density of dishes",
+"psf": false,                        "#": "Produce PSF map",
+"clean": false,
+"keep_dirty_map": false,                        "#": "Keep Dirty map?",
 "use_default_imaging_settings": true
 }
