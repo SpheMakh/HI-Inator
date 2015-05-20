@@ -180,7 +180,6 @@ def image(msname='$MS', lsmname='$LSM', remove=None, **kw):
     """ imaging/cleaning function """
    
     global NSRC
-    #NSRC = make_pure_lsm()
 
     msname,lsmname = interpolate_locals('msname lsmname')
     v.MS = msname
