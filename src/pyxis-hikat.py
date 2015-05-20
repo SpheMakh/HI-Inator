@@ -72,17 +72,18 @@ def simsky(msname='$MS', skymodel='$LSM',
 _ANTENNAS = {
     "meerkat": "MeerKAT64_ANTENNAS",
     "kat-7": "KAT7_ANTENNAS",
-    "vlaa": "vlaa.itrf.txt",
-    "vlab": "vlab.itrf.txt",
-    "vlac": "vlac.itrf.txt",
-    "vlad": "vlad.itrf.txt",
+    "jvlaa": "vlaa.itrf.txt",
+    "jvlab": "vlab.itrf.txt",
+    "jvlac": "vlac.itrf.txt",
+    "jvlad": "vlad.itrf.txt",
     "wsrt": "WSRT_ANTENNAS",
-    "ska1mid": "SKA1REF2_ANTENNAS",
+    "ska1mid254": "SKA1REF2_ANTENNAS",
     "ska1mid197": "SKA197_ANTENNAS",
 }
 
 def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
-           start=1, stop=1, config=None, addnoise=True, **kw):
+            clean=True, dirty=False, psf=False,
+           start=1, stop=1, config=None, addnoise=True):
 
     makedir(v.DESTDIR)
     
@@ -94,7 +95,7 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
     do_step = lambda step: step>=float(start) and step<=float(stop) 
     cellsize = None
     npix = None
-
+    
     config = config or CFG
     # Use parameter file settings
     if config:
@@ -121,8 +122,11 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
         fitsfile = "%s/%s"%(INDIR, params["sky_model"])
         OBSERVATORY = params["observatory"].lower()
 
-        if OBSERVATORY.startswith("vla"):
+        if OBSERVATORY.startswith("vla") or OBSERVATORY.startswith("jvla"):
             OBSERVATORY = "vla"
+
+        if OBSERVATORY.startswith("ska1mid") :
+            OBSERVATORY = "meerkat"
 
         elif OBSERVATORY in ["kat7","kat-7","kat_7"]:
             OBSERVATORY = "kat-7"
@@ -134,6 +138,11 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
         SEFD = params["sefd"]
         cellsize = params["cellsize"]
         npix = params["npix"]
+        
+        psf = params["psf"]
+        dirty = params["keep_dirty_map"]
+        clean = params["clean"]
+       
         
     get_pw = lambda fitsname: abs(pyfits.open(fitsname)[0].header['CDELT1'])
 
@@ -154,7 +163,8 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
             lsm_std.write(",".join(lsms))
             
         MS_LSM_List = ["%s,%s"%(a, b) for a, b in zip(mss, lsms) ]
-        x.sh('rm -f $IMAGELIST')
+
+        x.sh('rm -f $CLEANS $DIRTYS $PSFS')
 
         scalenoise = 1
         if addnoise:
@@ -167,15 +177,46 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
             msname,lsmname = II(ms_lsm_comb).split(',')
             v.MS = msname
             v.LSM = lsmname
-            _simms(**kw)
+            _simms()
             
             simsky(addnoise=addnoise, scalenoise=scalenoise, **options)
-            image()
-            _add(im.RESTORED_IMAGE, IMAGELIST)
+            image(restore=clean, dirty=dirty, psf=psf)
 
-        pper('MS_LSM', lambda : make_and_sim(**kw) )
-        images = get_list(IMAGELIST)
-        im.argo.combine_fits(images, outname=FULL_IMAGE, ctype='FREQ', keep_old=False)
+            if clean:
+                _add(im.RESTORED_IMAGE, CLEANS)
+            if dirty:
+                _add(im.DIRTY_IMAGE, DIRTYS)
+            if psf:
+                _add(im.PSF_IMAGE, PSFS)
+
+        pper('MS_LSM', make_and_sim)
+        
+        if clean:
+            images = get_list(CLEANS)
+            restored_image = outname="%s/%s_restored.fits"%(OUTDIR, prefix)
+            # combine images into a single image
+            im.argo.combine_fits(images, outname=restored_image, ctype='FREQ', keep_old=False)
+            info("Resulting restored image is at is: $restored_image")
+
+        if dirty:
+            images = get_list(DIRTYS)
+            dirty_image = outname="%s/%s_dirty.fits"%(OUTDIR, prefix)
+            # combine images into a single image
+            im.argo.combine_fits(images, outname=dirty_image, ctype='FREQ', keep_old=False)
+            info("Resulting dirty image is at is: $dirty_image")
+
+        if psf:
+            images = get_list(PSFS)
+            psf_image = outname="%s/%s_psf.fits"%(OUTDIR, prefix)
+            # combine images into a single image
+            im.argo.combine_fits(images, outname=psf_image, ctype='FREQ', keep_old=False)
+            info("Resulting psf image is at is: $psf_image")
+
+        info("Deleting temporary files")
+        for item in images:
+            x.sh("rm -f $item")
+
+        x.sh('rm -f $CLEANS $DIRTYS $PSFS')
 
 
 def image(msname='$MS', lsmname='$LSM', remove=None, **kw):
@@ -195,7 +236,7 @@ def image(msname='$MS', lsmname='$LSM', remove=None, **kw):
 
     ms.set_default_spectral_info()
 
-    im.make_image(dirty=False, restore=True, restored_image=RESTORED, 
+    im.make_image(restored_image=RESTORED, 
             restore_lsm=False, mgain=0.85, fitbeam=True,**kw)
 
     if remove:
