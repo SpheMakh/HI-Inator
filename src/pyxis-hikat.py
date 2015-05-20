@@ -77,6 +77,8 @@ _ANTENNAS = {
     "vlac": "vlac.itrf.txt",
     "vlad": "vlad.itrf.txt",
     "wsrt": "WSRT_ANTENNAS",
+    "ska1mid": "SKA1REF2_ANTENNAS",
+    "ska1mid197": "SKA197_ANTENNAS",
 }
 
 def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
