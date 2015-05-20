@@ -51,7 +51,7 @@ First make sure you have the latest docker (>= 1.3) installed (not the default U
 
 https://docs.docker.com/installation/ubuntulinux/#ubuntu-trusty-1404-lts-64-bit
 
-Once you have docker setup run: 
+Once you have docker setup, run: 
 
 1. Download casapy `$ make download`  
 2. Build container `$ make build`  
