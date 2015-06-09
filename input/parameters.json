@@ -10,7 +10,7 @@
 "dtime": 10,                            "#": "Integration time [in seconds]",
 "npix": 1024,
 "cellsize": null,                       "#": "I left empty. The will use input cube's cellsize [in arc seconds]",
-"split_cube": 2,                        "#": "when your cube too big (>200 channels) its good to split it smaller chunks",
+"split_cube": 2,                        "#": "when your cube too big (>200 channels) its good to split it into smaller chunks",
 "addnoise": false,                      "#": "Add noise to simulation. The noise will be based on the sefd",
 "sefd": 551,                            "#": "Sytem Equivalent flux density of dishes",
 "psf": false,                           "#": "Produce PSF map",

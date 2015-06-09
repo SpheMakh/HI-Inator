@@ -13,5 +13,5 @@ fi
 echo "where are we now"
 pwd
 
-pyxis CFG=${DATA}/input/parameters.json OUTFILE=/${DATA}/output/results OUTDIR=${DATA}/output azishe
+pyxis CFG=${DATA}/input/parameters.json DESTDIR=${DATA}/output OUTDIR=${DATA}/output azishe
 

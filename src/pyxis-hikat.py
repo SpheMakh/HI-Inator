@@ -142,6 +142,8 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
         psf = params["psf"]
         dirty = params["keep_dirty_map"]
         clean = params["clean"]
+
+        ncores(nm)
        
         
     get_pw = lambda fitsname: abs(pyfits.open(fitsname)[0].header['CDELT1'])
@@ -152,7 +154,7 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
     (ra, dec),(freq0, dfreq, nchan), naxis = fitsInfo(fitsfile)
     dfreq = abs(dfreq)
     chunks = nchan//nm
-    
+        
     mss = ['%s-%04d.MS'%(prefix,d) for d in range(nm)]
 
     if do_step(1):
@@ -173,7 +175,7 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
         
         global RECENTRE
         RECENTRE = False
-
+    
         def  make_and_sim(ms_lsm_comb="$MS_LSM", options={}, **kw):
             msname,lsmname = II(ms_lsm_comb).split(',')
             v.MS = msname
@@ -185,6 +187,8 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
             image(restore=clean, dirty=dirty, psf=psf)
 
             if clean:
+                _add(im.MODEL_IMAGE, MODELS)
+                _add(im.RESIDUAL_IMAGE, RESIDUALS)
                 _add(im.RESTORED_IMAGE, CLEANS)
             if dirty:
                 _add(im.DIRTY_IMAGE, DIRTYS)
@@ -192,35 +196,35 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
                 _add(im.PSF_IMAGE, PSFS)
 
         pper('MS_LSM', make_and_sim)
+
+        def _combine(imlist, label):
+            images = get_list(imlist)
+            image_name = outname="%s/%s_%s.fits"%(OUTDIR, prefix, label)
+            im.argo.combine_fits(images, outname=image_name, ctype='FREQ', keep_old=False)
+
         
         if clean:
-            images = get_list(CLEANS)
-            restored_image = outname="%s/%s_restored.fits"%(OUTDIR, prefix)
-            # combine images into a single image
-            im.argo.combine_fits(images, outname=restored_image, ctype='FREQ', keep_old=False)
-            info("Resulting restored image is at is: $restored_image")
+            for imlist, label in zip([MODELS, RESIDUALS, CLEANS],["model", "residual", "restored"]):
+                _combine(imlist, label)
+            info("Resulting clean,model and residual images are : $restored_image, $model_image, $residual_image")
+
             if RUN_SOURCE_FINDER:
                 lsm.sofia_search(restored_image, threshold=4, do_reliability=True)
 
         if dirty:
-            images = get_list(DIRTYS)
-            dirty_image = outname="%s/%s_dirty.fits"%(OUTDIR, prefix)
+            _combine(DIRTYS, "dirty")
             # combine images into a single image
-            im.argo.combine_fits(images, outname=dirty_image, ctype='FREQ', keep_old=False)
             info("Resulting dirty image is at is: $dirty_image")
 
         if psf:
-            images = get_list(PSFS)
-            psf_image = outname="%s/%s_psf.fits"%(OUTDIR, prefix)
+            _combine(PSFS, "psf")
             # combine images into a single image
-            im.argo.combine_fits(images, outname=psf_image, ctype='FREQ', keep_old=False)
             info("Resulting psf image is at is: $psf_image")
 
         info("Deleting temporary files")
-        for item in images:
-            x.sh("rm -f $item")
-
-        x.sh('rm -f $CLEANS $DIRTYS $PSFS')
+        x.sh("rm -f ${OUTDIR>/}${prefix}*wsclean*-first*.fits") # Not sure why wsclean produces these
+        x.sh('rm -f $MODELS $RESIDUALS $CLEANS $DIRTYS $PSFS')
+        info("DONE!")
 
 
 def image(msname='$MS', lsmname='$LSM', remove=None, **kw):
