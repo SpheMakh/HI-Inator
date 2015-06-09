@@ -41,7 +41,7 @@ To run HI-Inator without docker you will need to install MeqTrees and all its re
 Once you have all these installed: you can simply run the pipeline as follows. 
 ```
 cd HI-Inator/src
-pyxis CFG=../input/parameters.json OUTDIR=../output LSM=../input/example.fits azishe
+pyxis CFG=../input/parameters.json OUTDIR=../output azishe
 ```
 
 Then you simulation reseults--images and visibilities (Measurement set)-- should be in HI-Inator/output
@@ -51,7 +51,7 @@ First make sure you have the latest docker (>= 1.3) installed (not the default U
 
 https://docs.docker.com/installation/ubuntulinux/#ubuntu-trusty-1404-lts-64-bit
 
-Once you have docker setup run: 
+Once you have docker setup, run: 
 
 1. Download casapy `$ make download`  
 2. Build container `$ make build`  

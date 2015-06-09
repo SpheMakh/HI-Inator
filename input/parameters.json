@@ -17,5 +17,5 @@
 "clean": true,
 "keep_dirty_map": false,                "#": "Keep Dirty map?",
 "use_default_imaging_settings": true,
-"run_source_finder": false,              "#": "Run source finder (Sofia)"
+"run_source_finder": false,             "#": "Run source finder (Sofia)"
 }
