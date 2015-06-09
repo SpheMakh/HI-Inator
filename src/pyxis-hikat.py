@@ -24,7 +24,7 @@ import ms
 import lsm
 
 # Use simms to make simulatated measurement sets simms ( https://github.com/SpheMakh/simms.git )
-import simms
+from Simms import simms
 
 # import non standard package
 import pyfits
@@ -156,7 +156,8 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
     mss = ['%s-%04d.MS'%(prefix,d) for d in range(nm)]
 
     if do_step(1):
-        lsms = im.argo.splitfits(fitsfile, chunks, ctype="FREQ", prefix=prefix)
+        x.sh("fitstool.py --unstack=$prefix:freq:$chunks $fitsfile")
+        lsms = [ prefix+"-%04d.fits"%d for d in range(nm) ]
         
         with open(LSMLIST,'w') as lsm_std:
             makedir(OUTDIR)
@@ -177,6 +178,7 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
             msname,lsmname = II(ms_lsm_comb).split(',')
             v.MS = msname
             v.LSM = lsmname
+            adaptFITS(lsmname)
             _simms()
             
             simsky(addnoise=addnoise, scalenoise=scalenoise, **options)
@@ -197,6 +199,8 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
             # combine images into a single image
             im.argo.combine_fits(images, outname=restored_image, ctype='FREQ', keep_old=False)
             info("Resulting restored image is at is: $restored_image")
+            if RUN_SOURCE_FINDER:
+                lsm.sofia_search(restored_image, threshold=4, do_reliability=True)
 
         if dirty:
             images = get_list(DIRTYS)
@@ -423,7 +427,7 @@ def fitsInfo(fits):
     if naxis>3: freq_ind = 3 if hdr['CTYPE3'].startswith('FREQ') else 4
     else: 
         freq_ind = 3
-        if hdr['CRTYPE3'].startswith('FREQ') is False: 
+        if hdr['CTYPE3'].startswith('FREQ') is False: 
             return (ra,dec), (False, False, False) , naxis
 
     nchan = hdr['NAXIS%d'%freq_ind]
@@ -459,6 +463,32 @@ def simnoise (noise=0, rowchunk=100000, addToCol=None, scale_noise=1.0, column='
 
         tab.putcol(column, data, row0, nr)
     tab.close() 
+
+
+def adaptFITS(image):
+    """ Try to re-structre FITS file so that it conforms to lwimager standard """
+    
+    hdr = pyfits.open(image)[0].header
+    naxis = hdr["NAXIS"]
+    
+    # Figure if any axes have to be added be we proceed
+    if naxis>=2 and naxis < 4:
+        _freq = "--add-axis=freq:$FREQ0:DFREQ:Hz $image"
+        _stokes = "--add-axis=stokes:1:1:1"
+        if naxis == 2:
+            info("FITS Image has 2 axes. Will add FREQ and STOKES axes. We need these predict visibilities")
+            x.sh("fiitstool.py ${_stokes} ${_freq} $image")
+
+        elif naxis==3:
+            if hdr["CTYPE3"].lower().startswith("freq"):
+                # Will also need to reorder if freq is 3rd axis
+                x.sh("fitstool.py ${_stokes} --reorder=1,2,4,3 $image")
+
+            elif hdr["CTYPE3"].lower().startswith("stokes"):
+                x.sh("fitstool.py ${_freq} $image")
+
+    info("You image is now LWIMAGER approved ;) ")
+    
 
 
 def _add(addfile, filename='$MSLIST'):
