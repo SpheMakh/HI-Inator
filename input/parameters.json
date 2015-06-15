@@ -16,6 +16,6 @@
 "psf": false,                           "#": "Produce PSF map",
 "clean": true,
 "keep_dirty_map": false,                "#": "Keep Dirty map?",
-"use_default_imaging_settings": true,
-"run_source_finder": false,             "#": "Run source finder (Sofia)"
+"keep_ms": true,                "#": "Keep compress (tar.gz) and keep MS?",
+"use_default_imaging_settings": true
 }

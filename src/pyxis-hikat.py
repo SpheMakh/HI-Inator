@@ -23,8 +23,6 @@ import mqt
 import ms
 import lsm
 
-# Use simms to make simulatated measurement sets simms ( https://github.com/SpheMakh/simms.git )
-from Simms import simms
 
 # import non standard package
 import pyfits
@@ -95,6 +93,10 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
     do_step = lambda step: step>=float(start) and step<=float(stop) 
     cellsize = None
     npix = None
+    keep_ms = False
+    
+    # I do this to prevent some CASA madness
+    x.sh("casapy --help --log2term --nologger --nogui --help -c quit")
     
     config = config or CFG
     # Use parameter file settings
@@ -142,6 +144,7 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
         psf = params["psf"]
         dirty = params["keep_dirty_map"]
         clean = params["clean"]
+        keep_ms = params["keep_ms"]
 
         ncores(nm)
        
@@ -155,7 +158,7 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
     dfreq = abs(dfreq)
     chunks = nchan//nm
         
-    mss = ['%s-%04d.MS'%(prefix,d) for d in range(nm)]
+    v.MS_List = mss = ['%s/%s-%04d.MS'%(MSOUT,prefix,d) for d in range(nm)]
 
     if do_step(1):
         x.sh("fitstool.py --unstack=$prefix:freq:$chunks $fitsfile")
@@ -196,30 +199,33 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
                 _add(im.PSF_IMAGE, PSFS)
 
         pper('MS_LSM', make_and_sim)
+        msfinal = "%s/%s.MS"%(OUTDIR, prefix)
+        ms.virtconcat(msfinal, thorough=True)
+        # compress and/or delete MS/s
+        if keep_ms and config:
+            x.sh("tar -czf ${msfinal}.tar.gz $msfinal && rm -fr $msfinal")
+        else:
+            x.sh("rm -fr $msfinal")
 
+        # combine images into a single image
         def _combine(imlist, label):
             images = get_list(imlist)
             image_name = outname="%s/%s_%s.fits"%(OUTDIR, prefix, label)
             im.argo.combine_fits(images, outname=image_name, ctype='FREQ', keep_old=False)
+            return image_name
 
         
         if clean:
+            names = []
             for imlist, label in zip([MODELS, RESIDUALS, CLEANS],["model", "residual", "restored"]):
-                _combine(imlist, label)
-            info("Resulting clean,model and residual images are : $restored_image, $model_image, $residual_image")
-
-            if RUN_SOURCE_FINDER:
-                lsm.sofia_search(restored_image, threshold=4, do_reliability=True)
+               names.append( _combine(imlist, label) )
+            info("Resulting clean,model and residual images are : $restored_image, %s %s %s"%tuple(names))
 
         if dirty:
-            _combine(DIRTYS, "dirty")
-            # combine images into a single image
-            info("Resulting dirty image is at is: $dirty_image")
+            info("Resulting dirty image is at is: %s"%_combine(DIRTYS, "dirty"))
 
         if psf:
-            _combine(PSFS, "psf")
-            # combine images into a single image
-            info("Resulting psf image is at is: $psf_image")
+            info("Resulting psf image is at is: $psf_image"%_combine(PSFS, "psf"))
 
         info("Deleting temporary files")
         x.sh("rm -f ${OUTDIR>/}${prefix}*wsclean*-first*.fits") # Not sure why wsclean produces these
@@ -244,8 +250,7 @@ def image(msname='$MS', lsmname='$LSM', remove=None, **kw):
 
     ms.set_default_spectral_info()
 
-    im.make_image(restored_image=RESTORED, 
-            restore_lsm=False, mgain=0.85, fitbeam=True,**kw)
+    im.make_image(restore_lsm=False, mgain=0.85, fitbeam=True,**kw)
 
     if remove:
         remove_channels_from_extremes(II(RESTORED),channels=remove)
@@ -348,15 +353,15 @@ def _simms(msname='$MS', observatory='$OBSERVATORY', antennas='$ANTENNAS',
            fromfits=True, fitsfile='$LSM',
            **kw):
     """ create simulated measurement set """
+    makedir(MSOUT)
 
     msname, observatory, antennas, direction, freq0, fitsfile = \
         interpolate_locals('msname observatory antennas direction freq0 fitsfile')
-
+    
     if MS_REDO is False and exists(msname):
         v.MS = msname
         return
 
-    makedir(MSOUT)
 
     if fromfits:
         # I only need freq,dfreq,nchan from the bellow line
@@ -373,7 +378,7 @@ def _simms(msname='$MS', observatory='$OBSERVATORY', antennas='$ANTENNAS',
     synthesis = SCAN
 
     info('Making simulated MS: $msname. This may take a while')
-    simms.create_empty_ms(msname, tel=observatory, direction=direction, 
+    ms.create_empty_ms(msname, tel=observatory, direction=direction, 
                 pos=antennas, nbands=SPWIDS, synthesis=synthesis, 
                 dtime=dtime, freq0=freq0, dfreq=dfreq, nchan=nchan, **kw)
 
@@ -493,7 +498,6 @@ def adaptFITS(image):
 
     info("You image is now LWIMAGER approved ;) ")
     
-
 
 def _add(addfile, filename='$MSLIST'):
   """ Keeps track of Files when running multiple threads.
