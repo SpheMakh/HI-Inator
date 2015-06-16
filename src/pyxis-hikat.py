@@ -233,10 +233,10 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
             info("Resulting clean,model and residual images are : $restored_image, %s %s %s"%tuple(names))
 
         if dirty:
-            info("Resulting dirty image is at is: %s"%_combine(DIRTYS, "dirty"))
+            info("Resulting dirty image is at: %s"%_combine(DIRTYS, "dirty"))
 
         if psf:
-            info("Resulting psf image is at is: $psf_image"%_combine(PSFS, "psf"))
+            info("Resulting psf image is at: %s"%_combine(PSFS, "psf"))
 
         info("Deleting temporary files")
         x.sh("rm -f ${OUTDIR>/}${prefix}*wsclean*-first*.fits") # Not sure why wsclean produces these
