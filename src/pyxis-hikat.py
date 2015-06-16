@@ -96,20 +96,30 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
     keep_ms = False
     
     # I do this to prevent some CASA madness
+    info("Initialise CASA on the container")
     x.sh("casapy --help --log2term --nologger --nogui --help -c quit")
     
     config = config or CFG
     # Use parameter file settings
     if config:
         with open(config) as params_std:
-            params = json.load(params_std)
+            jparams = json.load(params_std)
     
-        # Remove empty strings and coments, and convert unicode characters to strings
-        for key in params.keys():
-            if params[key] == "" or key in ["#"]:
-                del params[key]
-            elif isinstance(params[key],unicode):
-                params[key] = str(params[key])
+        # create a new dict from the json file
+        params = {}
+        for key, val in jparams.iteritems():
+            # Make sure all keys are strings
+            _key = str(key)
+            
+            # ignore empty strings and comments
+            if val=="" or _key=="#":
+                pass
+            #convert unicode values to strings
+            elif isinstance(val,unicode):
+                params[_key] = str(val)
+            else:
+                params[_key] = val
+
 
         global SYNTHESIS, SCAN, DIRECTION, OBSERVATORY, ANTENNAS, DEFAULT_IMAGING_SETTINGS, SEFD
 
@@ -147,6 +157,7 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
         keep_ms = params["keep_ms"]
 
         ncores(nm)
+
        
         
     get_pw = lambda fitsname: abs(pyfits.open(fitsname)[0].header['CDELT1'])
