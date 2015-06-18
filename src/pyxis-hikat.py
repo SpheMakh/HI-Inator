@@ -47,7 +47,7 @@ def simsky(msname='$MS', skymodel='$LSM',
     msname, skymodel, column, freq_chunks = interpolate_locals('msname skymodel column freq_chunks')
 
     if RECENTRE:
-        ra, dec = map(np.rad2deg, [ dm.direction(DIRECTION)[m]["value"] for m in "m0","m1"])
+        ra, dec = map(np.rad2deg, [ dm.direction(*DIRECTION.split(","))[m]["value"] for m in "m0","m1"])
         recentre_fits(skymodel, ra=ra, dec=dec)
 
     ms.set_default_spectral_info()
@@ -100,6 +100,7 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
     x.sh("casapy --help --log2term --nologger --nogui --help -c quit")
     
     config = config or CFG
+    source_finder = {}
     # Use parameter file settings
     if config:
         with open(config) as params_std:
@@ -155,7 +156,24 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
         dirty = params["keep_dirty_map"]
         clean = params["clean"]
         keep_ms = params["keep_ms"]
+    
+        # Source finder business
+        global RUN_SOURCE_FINDER
+        RUN_SOURCE_FINDER = params["run_source_finder"]
+        source_finder["threshold"] = params["sf_thresh"]
 
+        if params["sf_conf"]:
+            sf_conf = params["sf_conf"]
+            look_here = [sf_conf] + map(II, "input/${input:FILE} ${input:FILE}".split() )
+
+            found_path = False
+            for _path in look_here:
+                if exists(_path):
+                    source_finder["sofia_conf"] = _path
+                    break
+            if not found_path:
+                warn("Cannot find your custom Sofia conf. Will use system default")
+            
         ncores(nm)
 
        
@@ -181,14 +199,14 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
             
         MS_LSM_List = ["%s,%s"%(a, b) for a, b in zip(mss, lsms) ]
 
-        x.sh('rm -f $CLEANS $DIRTYS $PSFS')
+        x.sh('rm -f $CLEANS $DIRTYS $PSFS $MODELS $RESIDUALS')
 
         scalenoise = 1
         if addnoise:
             scalenoise = math.sqrt(SCAN/float(SYNTHESIS)) if SCAN < SYNTHESIS else 1.0
         
         global RECENTRE
-        RECENTRE = False
+        RECENTRE = True
     
         def  make_and_sim(ms_lsm_comb="$MS_LSM", options={}, **kw):
             msname,lsmname = II(ms_lsm_comb).split(',')
@@ -201,22 +219,22 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
             image(restore=clean, dirty=dirty, psf=psf)
 
             if clean:
-                _add(im.MODEL_IMAGE, MODELS)
-                _add(im.RESIDUAL_IMAGE, RESIDUALS)
-                _add(im.RESTORED_IMAGE, CLEANS)
+                _add("${im.MODEL_IMAGE}", MODELS)
+                _add("${im.RESIDUAL_IMAGE}", RESIDUALS)
+                _add("${im.RESTORED_IMAGE}", CLEANS)
             if dirty:
-                _add(im.DIRTY_IMAGE, DIRTYS)
+                _add("${im.DIRTY_IMAGE}", DIRTYS)
             if psf:
-                _add(im.PSF_IMAGE, PSFS)
+                _add("${im.PSF_IMAGE}", PSFS)
 
         pper('MS_LSM', make_and_sim)
-        msfinal = "%s/%s.MS"%(OUTDIR, prefix)
-        ms.virtconcat(msfinal, thorough=True)
+        v.MS = "%s/%s.MS"%(OUTDIR, prefix)
+        ms.virtconcat(MS, thorough=True)
         # compress and/or delete MS/s
         if keep_ms and config:
-            x.sh("tar -czf ${msfinal}.tar.gz $msfinal && rm -fr $msfinal")
+            x.sh("tar -czf ${MS}.tar.gz $MS && rm -fr $MS")
         else:
-            x.sh("rm -fr $msfinal")
+            x.sh("rm -fr $MS")
 
         # combine images into a single image
         def _combine(imlist, label):
@@ -232,6 +250,9 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
                names.append( _combine(imlist, label) )
             info("Resulting clean,model and residual images are : $restored_image, %s %s %s"%tuple(names))
 
+            if RUN_SOURCE_FINDER:
+                lsm.sofia_search(fitsname=names[-1], do_reliability=False, **source_finder)
+
         if dirty:
             info("Resulting dirty image is at: %s"%_combine(DIRTYS, "dirty"))
 
@@ -239,7 +260,7 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
             info("Resulting psf image is at: %s"%_combine(PSFS, "psf"))
 
         info("Deleting temporary files")
-        x.sh("rm -f ${OUTDIR>/}${prefix}*wsclean*-first*.fits") # Not sure why wsclean produces these
+        x.sh("rm -f ${OUTDIR>/}*wsclean*first-residual.fits") # Not sure why wsclean produces these
         x.sh('rm -f $MODELS $RESIDUALS $CLEANS $DIRTYS $PSFS')
         info("DONE!")
 
@@ -399,11 +420,9 @@ def _simms(msname='$MS', observatory='$OBSERVATORY', antennas='$ANTENNAS',
 def recentre_fits(fitsname, ra, dec):
     """ recentre FITS file """
     with pyfits.open(fitsname) as hdu:
-        hdr = hdu[0].header
-        hdr['CRVAL1'] = ra
-        hdr['CRVAL2'] = dec
+        hdu[0].header['CRVAL1'] = ra
+        hdu[0].header['CRVAL2'] = dec
         hdu.writeto(fitsname, clobber=True)
-
 
 def make_pure_lsm():
     makedir(DESTDIR)
@@ -430,7 +449,7 @@ def compute_vis_noise (sefd=None):
     spwtab.close()
 
     info(">>> $MS freq %.2f MHz (lambda=%.2fm), bandwidth %.2g kHz, %.2fs integrations, %.2fh synthesis"%(freq0*1e-6, wavelength, bw*1e-3, dt, dtf/3600))
-    noise = sefd/math.sqrt(2*bw*dt)
+    noise = sefd/math.sqrt(abs(2*bw*dt))
     info(">>> SEFD of %.2f Jy gives per-visibility noise of %.2f mJy"%(sefd, noise*1000))
 
     return noise 
@@ -502,7 +521,7 @@ def adaptFITS(image):
         elif naxis==3:
             if hdr["CTYPE3"].lower().startswith("freq"):
                 # Will also need to reorder if freq is 3rd axis
-                x.sh("fitstool.py ${_stokes} --reorder=1,2,4,3 $image")
+                x.sh("fitstool.py ${_stokes} $image && fitstool.py --reorder=1,2,4,3 $image")
 
             elif hdr["CTYPE3"].lower().startswith("stokes"):
                 x.sh("fitstool.py ${_freq} $image")

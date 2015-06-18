@@ -16,6 +16,9 @@
 "psf": false,                           "#": "Produce PSF map",
 "clean": true,
 "keep_dirty_map": false,                "#": "Keep Dirty map?",
-"keep_ms": true,                "#": "Keep compress (tar.gz) and keep MS?",
-"use_default_imaging_settings": true
+"keep_ms": true,                        "#": "Keep compress (tar.gz) and keep MS?",
+"use_default_imaging_settings": true,
+"run_source_finder": false,              "#": "Run sofia on the restored image",
+"sf_thresh": 4,                         "#": "Source finder threshold",
+"sf_conf": null,                        "#": "Custom Sofia conf file. Place this file in input/ "
 }
