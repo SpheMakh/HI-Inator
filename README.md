@@ -1,6 +1,6 @@
-# HI-Inator
-Radio interefometry simulator/imager tailored for Multi-Frequency FITS images as sky models. \\
-
+# HI-Inator  
+![logo](https://github.com/SpheMakh/HI-Inator/blob/sofia/logo.png)
+Radio interefometry simulator/imager tailored for Multi-Frequency FITS images as sky models.
 # Download
 ```
 git clone https://github.com/SpheMakh/HI-Inator
