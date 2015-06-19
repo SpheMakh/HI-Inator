@@ -219,13 +219,13 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
             image(restore=clean, dirty=dirty, psf=psf)
 
             if clean:
-                _add("${im.MODEL_IMAGE}", MODELS)
-                _add("${im.RESIDUAL_IMAGE}", RESIDUALS)
-                _add("${im.RESTORED_IMAGE}", CLEANS)
+                _add(im.MODEL_IMAGE, MODELS)
+                _add(im.RESIDUAL_IMAGE, RESIDUALS)
+                _add(im.RESTORED_IMAGE, CLEANS)
             if dirty:
-                _add("${im.DIRTY_IMAGE}", DIRTYS)
+                _add(im.DIRTY_IMAGE, DIRTYS)
             if psf:
-                _add("${im.PSF_IMAGE}", PSFS)
+                _add(im.PSF_IMAGE, PSFS)
 
         pper('MS_LSM', make_and_sim)
         v.MS = "%s/%s.MS"%(OUTDIR, prefix)
@@ -260,7 +260,8 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
             info("Resulting psf image is at: %s"%_combine(PSFS, "psf"))
 
         info("Deleting temporary files")
-        x.sh("rm -f ${OUTDIR>/}*wsclean*first-residual.fits") # Not sure why wsclean produces these
+        x.sh("rm -f ${OUTDIR>/}*wsclean*-first-residual.fits") # Not sure why wsclean produces these
+        x.sh("rm -f ${OUTDIR>/}*wsclean*-MFS*.fits") # Remove MFS images
         x.sh('rm -f $MODELS $RESIDUALS $CLEANS $DIRTYS $PSFS')
         info("DONE!")
 
