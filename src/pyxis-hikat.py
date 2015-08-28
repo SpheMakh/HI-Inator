@@ -36,24 +36,23 @@ import pyrap.quanta as dq
 import im.lwimager 
 
 
-def simsky(msname='$MS', skymodel='$LSM',
-           gain_err=None, pbeam=False,
+def simsky(gain_err=None, pbeam=False,
            pointing_err=None, addnoise=True, sefd=551,
            noise=0, scalenoise=1, column='$COLUMN',
            freq_chunks='$FREQ_CHUNKS',
            **kw):
     """ simulate sky into MS """
 
-    msname, skymodel, column, freq_chunks = interpolate_locals('msname skymodel column freq_chunks')
+    column, freq_chunks = interpolate_locals('column freq_chunks')
 
     if RECENTRE:
         ra, dec = map(np.rad2deg, [ dm.direction(*DIRECTION.split(","))[m]["value"] for m in "m0","m1"])
-        recentre_fits(skymodel, ra=ra, dec=dec)
+        recentre_fits(LSM, ra=ra, dec=dec)
 
     ms.set_default_spectral_info()
     im.IMAGE_CHANNELIZE = 1
 
-    im.lwimager.predict_vis(image=skymodel, column="MODEL_DATA", padding=1.5, wprojplanes=128)
+    im.lwimager.predict_vis(image=LSM, column="MODEL_DATA", padding=1.5, wprojplanes=128)
     # Clean up after lwimager
     xo.sh('rm -fr ${MS:BASE}*-channel*.img.residual') 
 
@@ -78,6 +77,16 @@ _ANTENNAS = {
     "ska1mid254": "SKA1REF2_ANTENNAS",
     "ska1mid197": "SKA197_ANTENNAS",
 }
+
+
+def try_again(cmd, exception, tries=3):
+    for i in range(tries):
+        try:
+            cmd()
+            return
+        except exception:
+            warn(" Attempt $i of running command $cmd failed. %d attemps left"%(tries-i-1) )
+    raise exception
 
 def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
             clean=True, dirty=False, psf=False,
@@ -147,6 +156,7 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
         ANTENNAS = "./observatories/"+_ANTENNAS[params["observatory"].lower()]
 
         nm = params["split_cube"]
+        ncpu = params["ncpu"]
         addnoise = params["addnoise"]
         SEFD = params["sefd"]
         cellsize = params["cellsize"]
@@ -174,7 +184,7 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
             if not found_path:
                 warn("Cannot find your custom Sofia conf. Will use system default")
             
-        ncores(nm)
+        ncores(ncpu or nm)
 
        
         
@@ -226,6 +236,11 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
                 _add(im.DIRTY_IMAGE, DIRTYS)
             if psf:
                 _add(im.PSF_IMAGE, PSFS)
+        
+        # CASA has issues with running things in parallel
+        # So I create the MSs sequentially
+        #for msname in MS_List:
+        #    _simms(msname)
 
         pper('MS_LSM', make_and_sim)
         v.MS = "%s/%s.MS"%(OUTDIR, prefix)
@@ -527,7 +542,22 @@ def adaptFITS(image):
             elif hdr["CTYPE3"].lower().startswith("stokes"):
                 x.sh("fitstool.py ${_freq} $image")
 
-    info("You image is now LWIMAGER approved ;) ")
+
+    with pyfits.open(image) as hdu:
+        hdr = hdu[0].header
+        freq_ind = filter(lambda ind: hdr["CTYPE%d"%ind].startswith("FREQ"), range(1,5) )[0]
+
+        if hdr["CDELT%d"%freq_ind] <0:
+            dfreq = abs(hdr["CDELT%d"%freq_ind])
+            nchan = hdr["NAXIS%d"%freq_ind]
+            freq0 = hdr["CRVAL%d"%freq_ind]
+            hdu[0].header["CDELT%d"%freq_ind] = dfreq
+            hdu[0].header["CRVAL%d"%freq_ind] = freq0 - nchan*dfreq
+            hdu.writeto(image, clobber=True)
+        
+            
+    info("You image is now OMS approved ;) ")
+
     
 
 def _add(addfile, filename='$MSLIST'):

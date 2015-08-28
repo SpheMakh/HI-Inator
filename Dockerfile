@@ -2,7 +2,7 @@ FROM radioastro/meqtrees
 RUN apt-get update && apt-get install -y time wsclean git casacore python-pip 
 
 RUN mkdir -p /code/depends
-RUN git clone https://github.com/ska-sa/pyxis /code/depends/pyxis
+RUN git clone -b fiela https://github.com/ska-sa/pyxis /code/depends/pyxis
 RUN git clone https://github.com/ska-sa/owlcat -b fiela /code/depends/owlcat
 RUN pip install psutil simms
 
