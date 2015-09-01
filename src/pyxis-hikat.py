@@ -88,6 +88,7 @@ def try_again(cmd, exception, tries=3):
             warn(" Attempt $i of running command $cmd failed. %d attemps left"%(tries-i-1) )
     raise exception
 
+
 def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
             clean=True, dirty=False, psf=False,
            start=1, stop=1, config=None, addnoise=True):
@@ -110,6 +111,7 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
     
     config = config or CFG
     source_finder = {}
+    component_model = False
     # Use parameter file settings
     if config:
         with open(config) as params_std:
@@ -166,6 +168,7 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
         dirty = params["keep_dirty_map"]
         clean = params["clean"]
         keep_ms = params["keep_ms"]
+        component_model = params["component_model"]
     
         # Source finder business
         global RUN_SOURCE_FINDER
@@ -186,8 +189,6 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
             
         ncores(ncpu or nm)
 
-       
-        
     get_pw = lambda fitsname: abs(pyfits.open(fitsname)[0].header['CDELT1'])
 
     im.cellsize = "%farcsec"%(cellsize or get_pw(fitsfile)*3600.)
@@ -226,6 +227,14 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
             _simms()
             
             simsky(addnoise=addnoise, scalenoise=scalenoise, **options)
+
+            if component_model:
+                mqt_opts = {"sim_mode":"add to MS", 
+                             "tiggerlsm.filename": component_model,
+                             "ms_sel.output_column": "CORRECTED_DATA"}
+
+                mqt.msrun(TURBO_SIM, job='_tdl_job_1_simulate_MS', section="sim", options=mqt_opts)
+
             image(restore=clean, dirty=dirty, psf=psf)
 
             if clean:
@@ -244,7 +253,8 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
 
         pper('MS_LSM', make_and_sim)
         v.MS = "%s/%s.MS"%(OUTDIR, prefix)
-        ms.virtconcat(MS, thorough=True)
+        im.argo.icasa("concat", vis=MS_List, concatvis=MS, timesort=True)
+        #ms.virtconcat(MS, thorough=True)
         # compress and/or delete MS/s
         if keep_ms and config:
             x.sh("tar -czf ${MS}.tar.gz $MS && rm -fr $MS")
