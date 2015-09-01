@@ -10,6 +10,7 @@ import numpy as np
 import tempfile
 import json
 import scipy.ndimage as nd
+import subprocess
 
 # some useful constants
 PI = math.pi
@@ -105,9 +106,16 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
     npix = None
     keep_ms = False
     
-    # I do this to prevent some CASA madness
-    info("Initialise CASA on the container")
-    x.sh("casapy --help --log2term --nologger --nogui --help -c quit")
+
+    # Initialise CASAPY if running on container
+    proc = subprocess.Popen(["sh","inDocker.sh"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if proc.stderr.read():
+        info("Cannot tell whether I'm running on a container or not. Will initialise CASA just as precaution")
+        x.sh("casapy --help --log2term --nologger --nogui --help -c quit")
+
+    elif proc.stdout.read().strip() == "True":
+        info("Initialising CASA on the container")
+        x.sh("casapy --help --log2term --nologger --nogui --help -c quit")
     
     config = config or CFG
     source_finder = {}
@@ -246,14 +254,14 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
             if psf:
                 _add(im.PSF_IMAGE, PSFS)
         
-        # CASA has issues with running things in parallel
-        # So I create the MSs sequentially
-        #for msname in MS_List:
-        #    _simms(msname)
-
         pper('MS_LSM', make_and_sim)
         v.MS = "%s/%s.MS"%(OUTDIR, prefix)
-        im.argo.icasa("concat", vis=MS_List, concatvis=MS, timesort=True)
+        im.argo.icasa("concat", vis=mss, concatvis=MS, timesort=True)
+        # clean up
+
+        for msname in mss:
+            x.sh("rm -fr $msname")
+
         #ms.virtconcat(MS, thorough=True)
         # compress and/or delete MS/s
         if keep_ms and config:
