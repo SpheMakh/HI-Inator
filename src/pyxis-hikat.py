@@ -204,7 +204,7 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
 
     (ra, dec),(freq0, dfreq, nchan), naxis = fitsInfo(fitsfile)
     dfreq = abs(dfreq)
-    chunks = nchan//nm
+    chunks = nchan/nearest_divisor(nchan, nm)
         
     v.MS_List = mss = ['%s/%s-%04d.MS'%(MSOUT,prefix,d) for d in range(nm)]
 
@@ -614,3 +614,19 @@ def get_list(filename='$MSLIST'):
     info('Found %d files.'%(len(mslist)))
 
     return mslist
+
+
+def nearest_divisor(a, b):
+    nums = numpy.arange(2, a//2, 1, dtype=float)
+    dd = numpy.divide(a, nums)%1 == 0
+    divs = nums[dd]
+    
+    print divs
+    dists = abs(divs - b)
+    print dists
+    
+    _min = numpy.where( dists==min(dists) )
+
+    return int(divs[_min])
+
+    
