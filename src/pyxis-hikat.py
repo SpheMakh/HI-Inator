@@ -166,7 +166,7 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
         ANTENNAS = "./observatories/"+_ANTENNAS[params["observatory"].lower()]
 
         nm = params["split_cube"]
-        ncpu = params["ncpu"]
+        ncpu = params.get("ncpu", nm)
         addnoise = params["addnoise"]
         SEFD = params["sefd"]
         cellsize = params["cellsize"]
@@ -176,7 +176,7 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
         dirty = params["keep_dirty_map"]
         clean = params["clean"]
         keep_ms = params["keep_ms"]
-        component_model = params["component_model"]
+        component_model = params.get("component_model", False)
     
         # Source finder business
         global RUN_SOURCE_FINDER
