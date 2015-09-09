@@ -53,6 +53,18 @@ def simsky(gain_err=None, pbeam=False,
     ms.set_default_spectral_info()
     im.IMAGE_CHANNELIZE = 1
 
+    # Replace image hdr with a lwimager made header
+    with pyfits.open(LSM) as hdu:
+        hdr = hdu[0].header
+        cell = abs(hdr["cdelt1"])*3600.
+        empty_image = tempfile.NamedTemporaryFile(suffix=".fits", dir=OUTDIR)
+        empty_image.flush()
+        im.argo.make_empty_image(image=empty_image.name, cellsize="%farcsec"%cell, npix=hdr["naxis1"])
+        hdu[0].header = pyfits.open(empty_image.name)[0].header
+        hdu.writeto(LSM, clobber=True)
+        empty_image.close()
+        
+
     im.lwimager.predict_vis(image=LSM, column="MODEL_DATA", padding=1.5, wprojplanes=128)
     # Clean up after lwimager
     xo.sh('rm -fr ${MS:BASE}*-channel*.img.residual') 
@@ -99,6 +111,7 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
     global MS_LSM_List
     fitsfile, prefix, nm, config = interpolate_locals("fitsfile prefix nm config")
 
+
     nm = int(nm)
 
     do_step = lambda step: step>=float(start) and step<=float(stop) 
@@ -144,7 +157,8 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
         global SYNTHESIS, SCAN, DIRECTION, OBSERVATORY, ANTENNAS, DEFAULT_IMAGING_SETTINGS, SEFD
 
         prefix = params["sim_id"] or "hi-inator"
-        
+        prefix = II("${OUTDIR>/}$prefix")        
+
         SYNTHESIS = params["synthesis"]
         SCAN = params["scanlength"]
         DTIME = params["dtime"]
@@ -166,7 +180,7 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
         ANTENNAS = "./observatories/"+_ANTENNAS[params["observatory"].lower()]
 
         nm = params["split_cube"]
-        ncpu = params["ncpu"]
+        ncpu = params.get("ncpu",nm)
         addnoise = params["addnoise"]
         SEFD = params["sefd"]
         cellsize = params["cellsize"]
@@ -176,7 +190,7 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
         dirty = params["keep_dirty_map"]
         clean = params["clean"]
         keep_ms = params["keep_ms"]
-        component_model = params["component_model"]
+        component_model = params.get("component_model", False)
     
         # Source finder business
         global RUN_SOURCE_FINDER
@@ -197,6 +211,12 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
             
         ncores(ncpu or nm)
 
+    _fits = tempfile.NamedTemporaryFile(suffix=".fits", dir=".")
+    _fits.flush()
+    std.copy(fitsfile, _fits.name)
+    fitsfile = _fits.name
+    adaptFITS(fitsfile)
+
     get_pw = lambda fitsname: abs(pyfits.open(fitsname)[0].header['CDELT1'])
 
     im.cellsize = "%farcsec"%(cellsize or get_pw(fitsfile)*3600.)
@@ -204,13 +224,33 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
 
     (ra, dec),(freq0, dfreq, nchan), naxis = fitsInfo(fitsfile)
     dfreq = abs(dfreq)
-    chunks = nchan/nearest_divisor(nchan, nm)
+    ## Find nearest divisor to nm
+    # First check if nchan is a prime. If so, pad the image along frequency axis
+    isprime = lambda n: False if n <2 else all(n % i for i in xrange(2, n))
+
+    if nchan>2 and isprime(nchan):
+        with pyfits.open(fitsfile) as hdu:
+            data = hdu[0].data
+            hdu[0].data = numpy.pad(data, pad_width=((0,1), (0,0), (0,0), (0,0)), mode="constant")
+            hdu.writeto(fitsname, clobber=True)
+        nchan += 1
+    
+    if nchan<4:
+        chunks = nchan
+        nm = 1
+    else:
+        nm = nearest_divisor(nchan, nm)
+        chunks = nchan/nm
         
-    v.MS_List = mss = ['%s/%s-%04d.MS'%(MSOUT,prefix,d) for d in range(nm)]
+    v.MS_List = mss = ['%s-%04d.MS'%(prefix,d) for d in range(nm)]
 
     if do_step(1):
-        x.sh("fitstool.py --unstack=$prefix:freq:$chunks $fitsfile")
-        lsms = [ prefix+"-%04d.fits"%d for d in range(nm) ]
+        if nm!=1:
+            x.sh("fitstool.py --unstack=$prefix:freq:$chunks $fitsfile")
+            lsms = [ prefix+"-%04d.fits"%d for d in range(nm) ]
+        else:
+            slsms = [fitsfile]
+        _fits.close()
         
         with open(LSMLIST,'w') as lsm_std:
             makedir(OUTDIR)
@@ -231,7 +271,7 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
             msname,lsmname = II(ms_lsm_comb).split(',')
             v.MS = msname
             v.LSM = lsmname
-            adaptFITS(lsmname)
+            #adaptFITS(lsmname)
             _simms()
             
             simsky(addnoise=addnoise, scalenoise=scalenoise, **options)
@@ -255,7 +295,7 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
                 _add(im.PSF_IMAGE, PSFS)
         
         pper('MS_LSM', make_and_sim)
-        v.MS = "%s/%s.MS"%(OUTDIR, prefix)
+        v.MS = "%s.MS"%prefix
         im.argo.icasa("concat", vis=mss, concatvis=MS, timesort=True)
         # clean up
 
@@ -272,7 +312,7 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
         # combine images into a single image
         def _combine(imlist, label):
             images = get_list(imlist)
-            image_name = outname="%s/%s_%s.fits"%(OUTDIR, prefix, label)
+            image_name = outname="%s_%s.fits"%(prefix, label)
             im.argo.combine_fits(images, outname=image_name, ctype='FREQ', keep_old=False)
             return image_name
 
@@ -538,30 +578,30 @@ def simnoise (noise=0, rowchunk=100000, addToCol=None, scale_noise=1.0, column='
     tab.close() 
 
 
-def adaptFITS(image):
+def adaptFITS(imagename):
     """ Try to re-structre FITS file so that it conforms to lwimager standard """
     
-    hdr = pyfits.open(image)[0].header
+    hdr = pyfits.open(imagename)[0].header
     naxis = hdr["NAXIS"]
     
     # Figure if any axes have to be added be we proceed
     if naxis>=2 and naxis < 4:
-        _freq = "--add-axis=freq:$FREQ0:DFREQ:Hz $image"
+        _freq = "--add-axis=freq:$FREQ0:DFREQ:Hz $imagename"
         _stokes = "--add-axis=stokes:1:1:1"
         if naxis == 2:
             info("FITS Image has 2 axes. Will add FREQ and STOKES axes. We need these predict visibilities")
-            x.sh("fiitstool.py ${_stokes} ${_freq} $image")
+            x.sh("fiitstool.py ${_stokes} ${_freq} $imagename")
 
         elif naxis==3:
             if hdr["CTYPE3"].lower().startswith("freq"):
                 # Will also need to reorder if freq is 3rd axis
-                x.sh("fitstool.py ${_stokes} $image && fitstool.py --reorder=1,2,4,3 $image")
+                x.sh("fitstool.py ${_stokes} $imagename && fitstool.py --reorder=1,2,4,3 $imagename")
 
             elif hdr["CTYPE3"].lower().startswith("stokes"):
-                x.sh("fitstool.py ${_freq} $image")
+                x.sh("fitstool.py ${_freq} $imagename")
 
 
-    with pyfits.open(image) as hdu:
+    with pyfits.open(imagename) as hdu:
         hdr = hdu[0].header
         freq_ind = filter(lambda ind: hdr["CTYPE%d"%ind].startswith("FREQ"), range(1,5) )[0]
 
@@ -571,11 +611,9 @@ def adaptFITS(image):
             freq0 = hdr["CRVAL%d"%freq_ind]
             hdu[0].header["CDELT%d"%freq_ind] = dfreq
             hdu[0].header["CRVAL%d"%freq_ind] = freq0 - nchan*dfreq
-            hdu.writeto(image, clobber=True)
+            hdu.writeto(imagename, clobber=True)
         
-            
-    info("You image is now OMS approved ;) ")
-
+    info("You image is now RATT approved ;) ")
     
 
 def _add(addfile, filename='$MSLIST'):
@@ -617,7 +655,8 @@ def get_list(filename='$MSLIST'):
 
 
 def nearest_divisor(a, b):
-    nums = numpy.arange(2, a//2, 1, dtype=float)
+
+    nums = numpy.arange(2, a//2+1, 1, dtype=float)
     dd = numpy.divide(a, nums)%1 == 0
     divs = nums[dd]
     
