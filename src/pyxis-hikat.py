@@ -108,7 +108,9 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
 
     makedir(v.DESTDIR)
     
-    global MS_LSM_List
+    global MS_LSM_List, STACKEM, RUN_SOURCE_FINDER
+    RUN_SOURCE_FINDER = False
+    STACKEM = False
     fitsfile, prefix, nm, config = interpolate_locals("fitsfile prefix nm config")
 
 
@@ -132,6 +134,7 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
     
     config = config or CFG
     source_finder = {}
+    _stackem = {}
     component_model = False
     # Use parameter file settings
     if config:
@@ -193,23 +196,38 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
         component_model = params.get("component_model", False)
     
         # Source finder business
-        global RUN_SOURCE_FINDER
-        RUN_SOURCE_FINDER = params["run_source_finder"]
-        source_finder["threshold"] = params["sf_thresh"]
+        _sofia = params.get("sofia", False)
+        if _sofia:
+            RUN_SOURCE_FINDER = _sofia["run"]
+            if RUN_SOURCE_FINDER:
+                source_finder["threshold"] = _sofia["threshold"]
+                source_finder["sofia_conf"] = _sofia["config"]
+                sf_conf = _sofia["config"]
 
-        if params["sf_conf"]:
-            sf_conf = params["sf_conf"]
-            look_here = [sf_conf] + map(II, "input/${input:FILE} ${input:FILE}".split() )
+                look_here = [sf_conf] + map(II, "input/${sf_conf:FILE} ${sf_conf:FILE}".split() )
+                found_path = False
 
-            found_path = False
-            for _path in look_here:
-                if exists(_path):
-                    source_finder["sofia_conf"] = _path
-                    break
-            if not found_path:
-                warn("Cannot find your custom Sofia conf. Will use system default")
+                for _path in look_here:
+                    if exists(_path):
+                        source_finder["sofia_conf"] = _path
+                        break
+                if not found_path:
+                    warn("Cannot find your custom Sofia conf. Will use system default")
             
         ncores(ncpu or nm)
+
+        _stack = params.get("stackem", False)
+        if _stack:
+            STACKEM = _stack["run"]
+            coords = _stack["coords"]
+            _stackem["width"] = _stack["width"]
+            _stackem["radec"] = II("${INDIR>/}$coords")
+
+            if not exists(_stackem["radec"]):
+                warn("Could not find your satcking coordinates file. Will not stack")
+                STACKEM = False
+                
+         
 
     _fits = tempfile.NamedTemporaryFile(suffix=".fits", dir=".")
     _fits.flush()
@@ -244,100 +262,101 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
         
     v.MS_List = mss = ['%s-%04d.MS'%(prefix,d) for d in range(nm)]
 
-    if do_step(1):
-        if nm!=1:
-            x.sh("fitstool.py --unstack=$prefix:freq:$chunks $fitsfile")
-            lsms = [ prefix+"-%04d.fits"%d for d in range(nm) ]
-        else:
-            slsms = [fitsfile]
-        _fits.close()
-        
-        with open(LSMLIST,'w') as lsm_std:
-            makedir(OUTDIR)
-            lsm_std.write(",".join(lsms))
-            
-        MS_LSM_List = ["%s,%s"%(a, b) for a, b in zip(mss, lsms) ]
 
-        x.sh('rm -f $CLEANS $DIRTYS $PSFS $MODELS $RESIDUALS')
 
-        scalenoise = 1
-        if addnoise:
-            scalenoise = math.sqrt(SCAN/float(SYNTHESIS)) if SCAN < SYNTHESIS else 1.0
-        
-        global RECENTRE
-        RECENTRE = True
+    if nm!=1:
+        x.sh("fitstool.py --unstack=$prefix:freq:$chunks $fitsfile")
+        lsms = [ prefix+"-%04d.fits"%d for d in range(nm) ]
+    else:
+        slsms = [fitsfile]
+    _fits.close()
     
-        def  make_and_sim(ms_lsm_comb="$MS_LSM", options={}, **kw):
-            msname,lsmname = II(ms_lsm_comb).split(',')
-            v.MS = msname
-            v.LSM = lsmname
-            #adaptFITS(lsmname)
-            _simms()
-            
-            simsky(addnoise=addnoise, scalenoise=scalenoise, **options)
-
-            if component_model:
-                mqt_opts = {"sim_mode":"add to MS", 
-                             "tiggerlsm.filename": component_model,
-                             "ms_sel.output_column": "CORRECTED_DATA"}
-
-                mqt.msrun(TURBO_SIM, job='_tdl_job_1_simulate_MS', section="sim", options=mqt_opts)
-
-            image(restore=clean, dirty=dirty, psf=psf)
-
-            if clean:
-                _add(im.MODEL_IMAGE, MODELS)
-                _add(im.RESIDUAL_IMAGE, RESIDUALS)
-                _add(im.RESTORED_IMAGE, CLEANS)
-            if dirty:
-                _add(im.DIRTY_IMAGE, DIRTYS)
-            if psf:
-                _add(im.PSF_IMAGE, PSFS)
+    with open(LSMLIST,'w') as lsm_std:
+        makedir(OUTDIR)
+        lsm_std.write(",".join(lsms))
         
-        pper('MS_LSM', make_and_sim)
-        v.MS = "%s.MS"%prefix
-        im.argo.icasa("concat", vis=mss, concatvis=MS, timesort=True)
-        # clean up
+    MS_LSM_List = ["%s,%s"%(a, b) for a, b in zip(mss, lsms) ]
 
-        for msname in mss:
-            x.sh("rm -fr $msname")
+    x.sh('rm -f $CLEANS $DIRTYS $PSFS $MODELS $RESIDUALS')
 
-        #ms.virtconcat(MS, thorough=True)
-        # compress and/or delete MS/s
-        if keep_ms and config:
-            x.sh("tar -czf ${MS}.tar.gz $MS && rm -fr $MS")
-        else:
-            x.sh("rm -fr $MS")
-
-        # combine images into a single image
-        def _combine(imlist, label):
-            images = get_list(imlist)
-            image_name = outname="%s_%s.fits"%(prefix, label)
-            im.argo.combine_fits(images, outname=image_name, ctype='FREQ', keep_old=False)
-            return image_name
-
+    scalenoise = 1
+    if addnoise:
+        scalenoise = math.sqrt(SCAN/float(SYNTHESIS)) if SCAN < SYNTHESIS else 1.0
+    
+    global RECENTRE
+    RECENTRE = True
+    
+    def  make_and_sim(ms_lsm_comb="$MS_LSM", options={}, **kw):
+        msname,lsmname = II(ms_lsm_comb).split(',')
+        v.MS = msname
+        v.LSM = lsmname
+        _simms()
         
+        simsky(addnoise=addnoise, scalenoise=scalenoise, **options)
+
+        if component_model:
+            mqt_opts = {"sim_mode":"add to MS", 
+                         "tiggerlsm.filename": component_model,
+                         "ms_sel.output_column": "CORRECTED_DATA"}
+
+            mqt.msrun(TURBO_SIM, job='_tdl_job_1_simulate_MS', section="sim", options=mqt_opts)
+
+        image(restore=clean, dirty=dirty, psf=psf)
+
         if clean:
-            names = []
-            for imlist, label in zip([MODELS, RESIDUALS, CLEANS],["model", "residual", "restored"]):
-               names.append( _combine(imlist, label) )
-            info("Resulting clean,model and residual images are : $restored_image, %s %s %s"%tuple(names))
-
-            if RUN_SOURCE_FINDER:
-                lsm.sofia_search(fitsname=names[-1], do_reliability=False, **source_finder)
-
+            _add(im.MODEL_IMAGE, MODELS)
+            _add(im.RESIDUAL_IMAGE, RESIDUALS)
+            _add(im.RESTORED_IMAGE, CLEANS)
         if dirty:
-            info("Resulting dirty image is at: %s"%_combine(DIRTYS, "dirty"))
-
+            _add(im.DIRTY_IMAGE, DIRTYS)
         if psf:
-            info("Resulting psf image is at: %s"%_combine(PSFS, "psf"))
+            _add(im.PSF_IMAGE, PSFS)
+    
+    pper('MS_LSM', make_and_sim)
+    v.MS = "%s.MS"%prefix
+    im.argo.icasa("concat", vis=mss, concatvis=MS, timesort=True)
+    # clean up
 
-        info("Deleting temporary files")
-        x.sh("rm -f ${OUTDIR>/}*wsclean*-first-residual.fits") # Not sure why wsclean produces these
-        x.sh("rm -f ${OUTDIR>/}*wsclean*-MFS*.fits") # Remove MFS images
-        x.sh('rm -f $MODELS $RESIDUALS $CLEANS $DIRTYS $PSFS')
-        info("DONE!")
+    for msname in mss:
+        x.sh("rm -fr $msname")
 
+    # compress and/or delete MS/s
+    if keep_ms and config:
+        x.sh("tar -czf ${MS}.tar.gz $MS && rm -fr $MS")
+    else:
+        x.sh("rm -fr $MS")
+
+    # combine images into a single image
+    def _combine(imlist, label):
+        images = get_list(imlist)
+        image_name = outname="%s_%s.fits"%(prefix, label)
+        im.argo.combine_fits(images, outname=image_name, ctype='FREQ', keep_old=False)
+        return image_name
+
+    if clean:
+        names = []
+        for imlist, label in zip([MODELS, RESIDUALS, CLEANS],["model", "residual", "restored"]):
+           names.append( _combine(imlist, label) )
+        info("Resulting clean,model and residual images are : $restored_image, %s %s %s"%tuple(names))
+
+    if dirty:
+        info("Resulting dirty image is at: %s"%_combine(DIRTYS, "dirty"))
+
+    if psf:
+        info("Resulting psf image is at: %s"%_combine(PSFS, "psf"))
+
+    info("Deleting temporary files")
+    x.sh("rm -f ${OUTDIR>/}*wsclean*-first-residual.fits") # Not sure why wsclean produces these
+    x.sh("rm -f ${OUTDIR>/}*wsclean*-MFS*.fits") # Remove MFS images
+    x.sh('rm -f $MODELS $RESIDUALS $CLEANS $DIRTYS $PSFS')
+
+    if RUN_SOURCE_FINDER:
+        lsm.sofia_search(fitsname=names[-1], do_reliability=False, **source_finder)
+        
+    if STACKEM and clean:
+        stackLines(coords=_stackem["radec"], imagename="NCUBE_4T/meerkat_withnoise_new_restored.fits", width=_stackem["width"])
+
+    info("DONE!")
 
 def image(msname='$MS', lsmname='$LSM', remove=None, **kw):
     """ imaging/cleaning function """
@@ -467,7 +486,6 @@ def _simms(msname='$MS', observatory='$OBSERVATORY', antennas='$ANTENNAS',
     if MS_REDO is False and exists(msname):
         v.MS = msname
         return
-
 
     if fromfits:
         # I only need freq,dfreq,nchan from the bellow line
@@ -668,4 +686,48 @@ def nearest_divisor(a, b):
 
     return int(divs[_min])
 
-    
+
+def stackLines(coords, imagename="${im.RESTORED_IMAGE}", width=1, prefix=None):
+
+    imagename = II(imagename)
+    # First make avergae PSF image
+    im.make_image(psf=True, dirty=False, channelize=0)
+    ex, ey = measure_psf(im.PSF_IMAGE)
+    beam = math.sqrt(ex*ey)
+    prefix = prefix or II("${OUTDIR>/}${MS:BASE}-stacked")
+    x.sh("./stackem.py -i $imagename -p $prefix -c $coords -w $width")
+
+
+def measure_psf (psffile, arcsec_size=30):
+    from scipy.ndimage.measurements import maximum_position, minimum_position
+    ff = pyfits.open(psffile);
+    pp = ff[0].data.T[:,:,0,0]
+    secpix = abs(ff[0].header['CDELT1']*3600)
+    ## get midpoint and size of cross-sections
+    xmid,ymid = maximum_position(pp)
+
+    sz = int(arcsec_size/secpix);
+    xsec = pp[xmid-sz:xmid+sz,ymid]
+    ysec = pp[xmid,ymid-sz:ymid+sz]
+    axis = numpy.arange(-sz,sz)*secpix
+    def fwhm (tsec):
+        from scipy.interpolate import interp1d
+        tmid = len(tsec)/2;
+        # find first minima off the peak, and flatten cross-section outside them
+#        print tsec,tmid
+        xmin = minimum_position(tsec[:tmid])[0];
+        tsec[:xmin] = tsec[xmin];
+        xmin = minimum_position(tsec[tmid:])[0];
+        tsec[tmid+xmin:] = tsec[tmid+xmin];
+        if tsec[0] > .5 or tsec[-1] > .5:
+              warn("PSF FWHM over %2.f arcsec"%(arcsec_size*2));
+              return arcsec_size,arcsec_size;
+        x1 = interp1d(tsec[:tmid],range(tmid))(0.5);
+        x2 = interp1d(1-tsec[tmid:],range(tmid,len(tsec)))(0.5);
+        return x1,x2;
+
+    ix0,ix1 = fwhm(xsec)
+    iy0,iy1 = fwhm(ysec)
+
+    rx,ry = (ix1-ix0)*secpix,(iy1-iy0)*secpix
+    return rx,ry 
