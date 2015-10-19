@@ -1,17 +1,11 @@
 #!/bin/bash -ve
 
-if [ -z "$1" ]; then
-    DATA=/
-else
-    DATA=$1
-fi
-
 if [ -z "$USER" ]; then
   export USER=root
 fi
 
 echo "The configuratio file is: "
-echo $config
+echo $CONFIG
 
-pyxis CFG=${DATA}/input/${config} DESTDIR=${DATA}/output OUTDIR=${DATA}/output azishe
+pyxis CFG=${CONFIG} DESTDIR=/output OUTDIR=${OUTPUT} INDIR=${INPUT} azishe
 

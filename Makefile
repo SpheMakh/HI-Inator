@@ -7,19 +7,17 @@ endif
 
 .PHONY: all build run force-build
 
-all: download build run
+all: build run
 
-download:
-	./download.sh
 
 build:
-	./download.sh && docker build -t $(IMAGE_NAME) .
+	docker build -t $(IMAGE_NAME) .
 
 force-build:
-	./download.sh && docker build --pull -t $(IMAGE_NAME) --no-cache=true .
+	docker build --pull -t $(IMAGE_NAME) --no-cache=true .
 
 run:
-	docker run -v `pwd`/input:/input:ro -v `pwd`/output:/output:rw -e config=$(config) $(IMAGE_NAME) 
+	docker run -v `pwd`/input:/input:ro -v `pwd`/output:/output:rw -e CONFIG=/input/$(config) $(IMAGE_NAME) 
 
 shell:
-	docker run -ti -v `pwd`/input:/input:ro -v `pwd`/output:/output:rw $(IMAGE_NAME) bash .
+	docker run -v `pwd`/input:/input:ro -v `pwd`/output:/output:rw -e CONFIG=/input/$(config) -it $(IMAGE_NAME)  bash

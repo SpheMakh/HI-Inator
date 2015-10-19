@@ -1,42 +1,16 @@
-FROM radioastro/meqtrees
-RUN apt-get update && apt-get install -y time wsclean git casacore python-pip 
+FROM penthesilea/imager
 
-RUN mkdir -p /code/depends
-RUN git clone -b fiela https://github.com/ska-sa/pyxis /code/depends/pyxis
-RUN git clone https://github.com/ska-sa/owlcat -b fiela /code/depends/owlcat
 RUN pip install psutil simms
 
-RUN cd /code/depends/owlcat && python setup.py install
+# Remove native recipe
+RUN rm /code -rf
 
-ENV PATH /code/depends/pyxis/Pyxis/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/casapy
-ENV PYTHONPATH /code/depends/pyxis:$PYTHONPATH
-
-ENV USER root
-ADD src/casarc /root/.casarc
-
-ADD geodetic /code/geodetic
-ADD casapy-42.2.30986-1-64b.tar.gz /opt/
-RUN ln -s /opt/casapy-42.2.30986-1-64b /opt/casapy
-
-RUN apt-get update && apt-get -qy install \
-    libglib2.0-0 \
-    libfreetype6 \
-    libsm6 \
-    libxi6 \
-    libxrender1 \
-    libxrandr2 \
-    libxfixes3 \
-    libxcursor1 \
-    libxinerama1 \
-    libfontconfig1 \
-    libkrb5-3 \
-    libgssapi-krb5-2
-
-ADD input /code
 ADD src /code
-RUN ln -s /code/run.sh /run.sh
 
-RUN mkdir /input /output
+RUN mkdir -p /input /output
+
+ENV INPUT /input
+ENV OUTPUT /output
 
 WORKDIR /code
-cmd /run.sh
+CMD  sh run.sh

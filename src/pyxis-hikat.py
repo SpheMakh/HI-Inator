@@ -8,6 +8,7 @@ import sys
 import math
 import numpy as np
 import tempfile
+#import mqt
 import json
 import scipy.ndimage as nd
 import subprocess
@@ -20,7 +21,6 @@ FWHM = math.sqrt(math.log(256))
 import Pyxis
 from Pyxis.ModSupport import *
 import im
-import mqt
 import ms
 import lsm
 
@@ -236,12 +236,12 @@ def azishe(fitsfile="$LSM", prefix='$MS_PREFIX', nm="$NM",
             
             simsky(addnoise=addnoise, scalenoise=scalenoise, **options)
 
-            if component_model:
-                mqt_opts = {"sim_mode":"add to MS", 
-                             "tiggerlsm.filename": component_model,
-                             "ms_sel.output_column": "CORRECTED_DATA"}
-
-                mqt.msrun(TURBO_SIM, job='_tdl_job_1_simulate_MS', section="sim", options=mqt_opts)
+#            if component_model:
+#                mqt_opts = {"sim_mode":"add to MS", 
+#                             "tiggerlsm.filename": component_model,
+#                             "ms_sel.output_column": "CORRECTED_DATA"}
+#
+#                mqt.msrun(TURBO_SIM, job='_tdl_job_1_simulate_MS', section="sim", options=mqt_opts)
 
             image(restore=clean, dirty=dirty, psf=psf)
 
@@ -399,7 +399,7 @@ def addnoise_fits(fitsname, outname, rms, correlated=False, clobber=True):
     tf = tempfile.NamedTemporaryFile(suffix='.fits',dir='.')
     tf.flush()
     tfname = tf.name
-    im.argo.make_empty_image(image=tfname)
+    im.argo.make_image(psf=True,dirty=False,psf_image=tfname)
     im.IMAGER = IMAGER # Rest imager name
     hdr = pyfits.open(tfname)[0].header
     hdr['CRPIX1'] = hdr0['CRPIX1']
