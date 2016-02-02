@@ -55,9 +55,8 @@ https://docs.docker.com/installation/ubuntulinux/#ubuntu-trusty-1404-lts-64-bit
 
 Once you have docker setup, run: 
 
-1. Download casapy `$ make download`  
-2. Build container `$ make build`  
-3. Run simulation `$ make run config=example_config.json`  
+1. Build image `$ make build`  
+2. Run simulation `$ make run config=example_config.json`  
 
 ### Things to note (with docker)
 * You only have to run `make download` once  
